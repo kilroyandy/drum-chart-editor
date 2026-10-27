@@ -1,6 +1,6 @@
 // Offline support for the installed Drum Chart Editor.
 // The page itself is fetched fresh when online (so it can't go stale) and served from cache when offline.
-const CACHE = "dce2-app-v1";
+const CACHE = "dce2-app-v2";
 const SHELL = ["./", "manifest.json", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
 const CDN = /^https:\/\/(cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com)\//;
 

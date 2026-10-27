@@ -162,7 +162,15 @@ main{max-width:1380px;margin:0 auto}
 .bar-len b{min-width:34px}
 .split-hint{flex-basis:100%;margin:2px 0 0;font-size:12px}
 .solo-tag{position:absolute;right:4px;top:1px;font-style:normal;font-family:var(--f-mono);font-size:9px;font-weight:700;color:var(--brass-ink);line-height:1}
+.sec-h .sn-btn{margin-left:auto}.sec-h .sn-btn+.flow{margin-left:0}
 .sec-h .flow{margin-left:auto}.sec-h .flow+.loop{margin-left:0}
+.sec-note{white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.45;color:var(--ink2);margin:-2px 0 10px;padding:6px 10px;border-left:3px solid var(--brass);background:var(--brass-soft);border-radius:0 6px 6px 0;font-style:italic}
+.sec-note[data-sn-edit]{cursor:text}.sec-note[data-sn-edit]:hover{outline:1px dashed var(--brass);outline-offset:-1px}
+@media (max-width:560px){.sec-h .sn-btn .sn-t{display:none}}
+.sec-note.editing{font-style:normal;background:none;border-left-color:var(--focus);padding:0 0 0 10px}
+.sec-note textarea{width:100%;box-sizing:border-box;resize:vertical;font:inherit;font-size:15px;line-height:1.45;min-height:3.2em;padding:6px 8px}
+.sec-note-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}.sec-note-act .mut{font-size:12px}
+#stBody .sec-note{font-size:calc(var(--sz,1.6) * 11px)}
 .sec-h .flow.on{color:var(--brass-ink)}
 .bar i{position:absolute;left:4px;top:1px;font-style:normal;font-family:var(--f-mono);font-size:9px;color:var(--mut);line-height:1}
 .bar svg{display:block}
@@ -577,7 +585,9 @@ function normSong(o) {
     return r;
   });
   const n = clean.length;
-  const fill = {}, brk = {}, solo = {}, flow = {};
+  const fill = {}, brk = {}, solo = {}, flow = {}, notes = {};
+  // notes: free text (notes, lyrics) shown under a section's title, by the section's first bar
+  if (o.notes && typeof o.notes === "object") for (const k in o.notes) { const i = +k, t = typeof o.notes[k] === "string" ? o.notes[k].replace(/\r\n?/g, "\n").replace(/\s+$/, "").slice(0, 2000) : ""; if (Number.isInteger(i) && i >= 0 && i < n && t.trim()) notes[i] = t; }
   // solo: bars that never join a repeat group · flow: sections (by first bar) whose repeats are written out
   for (const [src, dst] of [[o.solo, solo], [o.flow, flow]]) if (src && typeof src === "object") for (const k in src) { const i = +k; if (i >= 0 && i < n && src[k]) dst[i] = 1; }
   if (o.fill && typeof o.fill === "object") for (const k in o.fill) { const i = +k, v = (+o.fill[k]) & 255; if (i >= 0 && i < n && v) fill[i] = v; }
@@ -594,7 +604,7 @@ function normSong(o) {
     id: typeof o.id === "string" && o.id ? o.id : uid(),
     name: String(o.name || "Untitled").trim().slice(0, 80) || "Untitled",
     bpm: clamp(Math.round((+o.bpm || 120) * 10) / 10, 30, 300),
-    bars: clean, secs, fill, brk, solo, flow,
+    bars: clean, secs, fill, brk, solo, flow, notes,
     comp: o.comp !== false, own: o.own !== false,
     sel: clamp(+o.sel || 0, 0, n - 1),
     rec, full, created: +o.created || Date.now(), updated: +o.updated || Date.now(),
@@ -643,7 +653,7 @@ const RecDB = {
 
 /* ---------- Undo / redo ---------- */
 function histOf(s) { return App.hist[s.id] || (App.hist[s.id] = { undo: [], redo: [] }); }
-const snap = s => JSON.stringify({ bars: s.bars, secs: s.secs, fill: s.fill, brk: s.brk, solo: s.solo, flow: s.flow, bpm: s.bpm, name: s.name, comp: s.comp, own: s.own, rec: s.rec, full: s.full, sel: s.sel });
+const snap = s => JSON.stringify({ bars: s.bars, secs: s.secs, fill: s.fill, brk: s.brk, solo: s.solo, flow: s.flow, notes: s.notes, bpm: s.bpm, name: s.name, comp: s.comp, own: s.own, rec: s.rec, full: s.full, sel: s.sel });
 /* Every edit goes through change(): it records an undo point, applies the edit, saves and redraws. */
 function change(fn, opts = {}) {
   const s = App.cur; if (!s) return;
@@ -877,12 +887,20 @@ function tsTag(s, i) {
   const L = s.bars[i].length, prev = i > 0 ? s.bars[i - 1].length : 16;
   return L !== prev ? `<em class="ts-tag" title="Time signature ${timeSig(L)}">${timeSig(L)}</em>` : "";
 }
+/* Free text (notes, lyrics) under a section's title, along the top of its bars. Tap it to edit. */
+function secNoteHtml(s, c, stage) {
+  const t = s.notes[c.a] || "";
+  if (!stage && App.noteEdit === c.a) return `<div class="sec-note editing"><textarea class="txt" id="secNoteBox" data-sn="${c.a}" rows="${clamp(t.split("\n").length + 1, 2, 12)}" maxlength="2000" placeholder="Notes or lyrics for ${esc(c.label)}… (new lines are kept)" aria-label="Notes or lyrics for ${esc(c.label)}">${esc(t)}</textarea>
+    <div class="sec-note-act"><button class="btn sm pri" data-sn-save>Done</button><button class="btn sm ghost" data-sn-cancel>Cancel</button>${t ? `<button class="btn sm ghost" data-sn-del>Remove notes</button>` : ""}<span class="mut">Ctrl+Enter to finish · Esc to cancel</span></div></div>`;
+  if (!t) return "";
+  return stage ? `<div class="sec-note">${esc(t)}</div>` : `<div class="sec-note" data-sn-edit="${c.a}" role="button" tabindex="0" title="Tap to edit the notes">${esc(t)}</div>`;
+}
 function chartHtml(s, opts = {}) {
   const rows = usedRows(s), note = opts.note || App.note;
   let h = note !== "staff" ? `<div class="key"><span class="mut">Lines, top to bottom:</span> ${rows.map(r => `<b>${KIT[r].name}</b>`).join("<i>·</i>")}</div>` : "";
   sections(s).forEach(c => {
     h += `<div class="sec" data-a="${c.a}"><div class="sec-h"><h2>${esc(c.label)}</h2><span class="rng">bars ${c.a + 1}–${c.b}</span>` +
-      (opts.stage ? "" : flowBtn(s, c) + `<button class="btn sm ghost loop" data-loopsec="${c.a}" title="Play this section on repeat">↻ Practise</button>`) + `</div><div class="rows">`;
+      (opts.stage ? "" : `<button class="btn sm ghost sn-btn" data-sn-edit="${c.a}" title="Add notes or lyrics under this section's title" aria-label="${s.notes[c.a] ? "Edit" : "Add"} notes or lyrics">✎<span class="sn-t"> ${s.notes[c.a] ? "Notes" : "Add notes"}</span></button>` + flowBtn(s, c) + `<button class="btn sm ghost loop" data-loopsec="${c.a}" title="Play this section on repeat">↻ Practise</button>`) + `</div>` + secNoteHtml(s, c, opts.stage) + `<div class="rows">`;
     let prev = null;
     units(s, c.a, c.b).forEach(u => {
       if (breakBefore(s, u, prev)) h += `<div class="brk"></div>`;
@@ -1416,6 +1434,7 @@ function makeText(s) {
   let o = `${s.name}\n${s.bpm} BPM · 4/4 · ${s.bars.length} bars\n\n`;
   sections(s).forEach(c => {
     o += `== ${c.label} (bars ${c.a + 1}-${c.b}) ==\n`;
+    if (s.notes[c.a]) o += s.notes[c.a].split("\n").map(l => "   " + l).join("\n") + "\n\n";
     units(s, c.a, c.b).forEach(u => {
       if (u.n > 1) o += `[x${u.n}  bars ${u.s + 1}-${u.s + u.L * u.n}]\n`;
       rows.forEach(r => {
@@ -1443,6 +1462,23 @@ function pdfPen(d) {
   };
 }
 const PAGE = { W: 612, H: 792, M: 40 };
+/* A section's notes / lyrics, wrapped to the page width (at most 40 lines), and drawn under its title */
+const NOTE_LH = 11.5;
+function pdfNoteLines(d, s, c) {
+  const t = s.notes[c.a]; if (!t) return [];
+  d.setFont("helvetica", "italic"); d.setFontSize(9.5);
+  const w = PAGE.W - 2 * PAGE.M - 10, out = [];
+  t.split("\n").forEach(p => { const r = typeof d.splitTextToSize === "function" ? d.splitTextToSize(p || " ", w) : null; out.push(...(Array.isArray(r) && r.length ? r : [p])); });
+  d.setFont("helvetica", "normal"); return out.slice(0, 40);
+}
+const pdfNoteH = lines => lines.length ? lines.length * NOTE_LH + 8 : 0;
+function pdfNote(d, lines, y) {
+  if (!lines.length) return;
+  d.setFont("helvetica", "italic"); d.setFontSize(9.5); d.setTextColor(45);
+  lines.forEach((l, k) => d.text(l, PAGE.M + 8, y + 13 + k * NOTE_LH));
+  d.setDrawColor(185, 120, 26); d.setLineWidth(1.6); d.line(PAGE.M + 1.5, y + 4, PAGE.M + 1.5, y + 6 + lines.length * NOTE_LH);
+  d.setDrawColor(0); d.setTextColor(0); d.setFont("helvetica", "normal");
+}
 function pdfTitle(d, s, sub) {
   d.setTextColor(0); d.setFont("helvetica", "bold"); d.setFontSize(18); d.text(s.name, PAGE.M, PAGE.M + 4);
   d.setFont("helvetica", "normal"); d.setFontSize(9); d.setTextColor(90); d.text(`${s.bpm} BPM · 4/4 · ${s.bars.length} bars${sub ? " · " + sub : ""}`, PAGE.M, PAGE.M + 18); d.setTextColor(0);
@@ -1452,10 +1488,12 @@ function pdfLines(d, s, first) {
   const { M, H } = PAGE, LW = 46, BW = (PAGE.W - 2 * M - LW) / 4, rows = usedRows(s), sp = rows.length > 6 ? 7 : rows.length > 5 ? 8 : 10, SH = (rows.length - 1) * sp, RH = SH + 30;
   pdfTitle(d, s, "line chart"); let y = M + 44;
   sections(s).forEach(c => {
-    if (y + RH + 22 > H - M) { d.addPage(); y = M; }
+    const nl = pdfNoteLines(d, s, c), nh = pdfNoteH(nl);
+    if (y + nh + RH + 22 > H - M) { d.addPage(); y = M; }
     d.setFont("helvetica", "bold"); d.setFontSize(12); d.setTextColor(0); d.text(`${c.label}`, M, y); d.setFont("helvetica", "normal"); d.setFontSize(8); d.setTextColor(110); d.text(`bars ${c.a + 1}-${c.b}`, M + d.getTextWidth(c.label) * 12 / 8 + 8, y); d.setTextColor(0);
     d.setDrawColor(0); d.setLineWidth(1); d.line(M, y + 4, PAGE.W - M, y + 4);
-    let col = 0, prev = null, top = y + 24;
+    pdfNote(d, nl, y + 4);
+    let col = 0, prev = null, top = y + 24 + nh;
     const lab = () => rows.forEach((r, k) => { d.setFont("helvetica", "normal"); d.setFontSize(7); d.text(KIT[r].name, M + LW - 4, top + k * sp + 2.5, { align: "right" }); }); lab();
     // rows hold 64 sixteenths (four 4/4 bars); a short bar takes less room
     const S = BW / 16, unitSteps = u => { let n = 0; for (let j = 0; j < u.L; j++) n += s.bars[u.s + j].length; return n; };
@@ -1500,10 +1538,12 @@ function pdfStaff(d, s, first) {
   d.setTextColor(0);
   let y = M + 58;
   sections(s).forEach(c => {
-    if (y + RH + 16 > H - M) { d.addPage(); y = M; }
+    const nl = pdfNoteLines(d, s, c), nh = pdfNoteH(nl);
+    if (y + nh + RH + 16 > H - M) { d.addPage(); y = M; }
     d.setFont("helvetica", "bold"); d.setFontSize(12); d.text(`${c.label}`, M, y); d.setFont("helvetica", "normal"); d.setFontSize(8); d.setTextColor(110); d.text(`bars ${c.a + 1}-${c.b}`, M + d.getTextWidth(c.label) * 12 / 8 + 8, y); d.setTextColor(0);
     d.setDrawColor(0); d.setLineWidth(1); d.line(M, y + 4, PAGE.W - M, y + 4);
-    let col = 0, prev = null, top = y + 10 + ABOVE;
+    pdfNote(d, nl, y + 4);
+    let col = 0, prev = null, top = y + 10 + ABOVE + nh;
     const clef = () => { d.setFillColor(0); d.rect(M + LW - 16, top + u, 2.2, 2 * u, "F"); d.rect(M + LW - 11, top + u, 2.2, 2 * u, "F"); }; clef();
     // rows hold 64 sixteenths, as in the line chart
     const S = BW / 16, unitSteps = un => { let n = 0; for (let j = 0; j < un.L; j++) n += s.bars[un.s + j].length; return n; };
@@ -1588,7 +1628,7 @@ function showLib() {
 async function openSong(id, opts = {}) {
   const s = App.songs.find(x => x.id === id); if (!s) return showLib();
   if (P.on) pause(); P.cur = -1;
-  App.cur = s; App.view = "song"; App.rngEnd = null; document.body.classList.remove("lib");
+  App.cur = s; App.view = "song"; App.rngEnd = null; App.noteEdit = null; document.body.classList.remove("lib");
   $("#lib").hidden = true; $("#song").hidden = false; $("#transport").hidden = false;
   $("#crumb").hidden = false; $("#songTools").hidden = false; $("#libTools").hidden = true;
   $$(".kit-host").forEach(h => { if (!h.firstChild) h.innerHTML = kitSvg(); });
@@ -1638,6 +1678,7 @@ function closeMenus() { $$("#cardMenu").forEach(m => m.remove()); $$(".card.menu
 /* ---------- Song view ---------- */
 function refreshSong() {
   const s = App.cur; if (!s || App.view !== "song") return;
+  if (App.noteEdit != null && !(App.noteEdit in sections(s).reduce((o, c) => (o[c.a] = 1, o), {}))) App.noteEdit = null;
   $("#chart").innerHTML = chartHtml(s);
   renderEditor();
   if (document.activeElement !== $("#title")) $("#title").value = s.name;
@@ -1697,9 +1738,9 @@ function targets(i) { const s = App.cur, u = unitMap(s)[i]; if (!u || u.n < 2 ||
    deleted bar now starts on the first bar after the gap. */
 function shiftMaps(s, at, d) {
   const gone = j => d < 0 && j >= at + d && j < at;
-  for (const f of ["brk", "fill", "solo", "flow"]) {
+  for (const f of ["brk", "fill", "solo", "flow", "notes"]) {
     const n = {};
-    Object.keys(s[f]).forEach(k => { let j = +k; if (gone(j)) { if (f !== "flow") return; j = at + d; } else if (j >= at) j += d; if (j >= 0 && j < s.bars.length) n[j] = s[f][k]; });
+    Object.keys(s[f]).forEach(k => { let j = +k; if (gone(j)) { if (f !== "flow" && f !== "notes") return; j = at + d; } else if (j >= at) j += d; if (j >= 0 && j < s.bars.length) n[j] = s[f][k]; });
     s[f] = n;
   }
   s.secs.forEach(x => { if (gone(x.at)) x.at = at + d; else if (x.at >= at) x.at += d; });
@@ -1719,8 +1760,33 @@ function setFill(q) {
   const all = (1 << beatsIn(App.cur.bars[App.cur.sel].length)) - 1, nm = q === "all" ? (cur === all ? 0 : all) : cur ^ (1 << q);
   change(s => t.forEach(j => { if (nm) s.fill[j] = nm; else delete s.fill[j]; }));
 }
+/* ---------- Section notes / lyrics ---------- */
+App.noteEdit = null;
+function openNote(a) {
+  if (App.noteEdit != null && App.noteEdit !== a) saveNote();
+  App.noteEdit = a; $("#chart").innerHTML = chartHtml(App.cur);
+  const t = $("#secNoteBox"); if (t) { t.focus({ preventScroll: true }); t.setSelectionRange(t.value.length, t.value.length); t.closest(".sec-note").scrollIntoView({ block: "center", behavior: "smooth" }); }
+}
+function closeNote() { if (App.noteEdit == null) return; App.noteEdit = null; if (App.cur) $("#chart").innerHTML = chartHtml(App.cur); }
+function saveNote(text) {
+  const a = App.noteEdit, box = $("#secNoteBox"); if (a == null || !App.cur) return;
+  const v = (text !== undefined ? text : box ? box.value : "").replace(/\r\n?/g, "\n").replace(/\s+$/, "").slice(0, 2000);
+  App.noteEdit = null;
+  if (v === (App.cur.notes[a] || "")) { $("#chart").innerHTML = chartHtml(App.cur); return; }
+  change(s => { if (v.trim()) s.notes[a] = v; else delete s.notes[a]; });
+  if (!v.trim()) toast("Notes removed.", { label: "Undo", run: undo });
+}
+function noteClick(e) {
+  if (e.target.closest("[data-sn-save]")) { saveNote(); return true; }
+  if (e.target.closest("[data-sn-cancel]")) { closeNote(); return true; }
+  if (e.target.closest("[data-sn-del]")) { saveNote(""); return true; }
+  if (e.target.closest(".sec-note.editing")) return true;
+  const o = e.target.closest("[data-sn-edit]"); if (o) { openNote(+o.dataset.snEdit); return true; }
+  return false;
+}
 function setSection(name) {
-  change(s => { s.secs = s.secs.filter(x => x.at !== s.sel); if (name) s.secs.push({ at: s.sel, name }); s.secs.sort((a, b) => a.at - b.at); });
+  // removing a label (except on bar 1, which always starts a section) takes that section's notes with it
+  change(s => { s.secs = s.secs.filter(x => x.at !== s.sel); if (name) s.secs.push({ at: s.sel, name }); else if (s.sel > 0) delete s.notes[s.sel]; s.secs.sort((a, b) => a.at - b.at); });
 }
 function shiftHits(d) {
   const s0 = App.cur, flat = [].concat(...s0.bars), first = flat.findIndex(m => m);
@@ -2641,8 +2707,8 @@ function joinPrev() {
   const n = m.z - m.a + 1, emptied = m.z + 1 >= m.cur.b;
   change(s => {
     const lab = labelAt(s, m.cur.a);
-    if (emptied) { if (lab) s.secs = s.secs.filter(x => x !== lab); if (s.flow[m.cur.a]) delete s.flow[m.cur.a]; }
-    else if (lab) { lab.at = m.z + 1; if (s.flow[m.cur.a]) { delete s.flow[m.cur.a]; s.flow[m.z + 1] = 1; } }
+    if (emptied) { if (lab) s.secs = s.secs.filter(x => x !== lab); if (s.flow[m.cur.a]) delete s.flow[m.cur.a]; if (m.cur.a > 0) delete s.notes[m.cur.a]; }
+    else if (lab) { lab.at = m.z + 1; if (s.flow[m.cur.a]) { delete s.flow[m.cur.a]; s.flow[m.z + 1] = 1; } if (s.notes[m.cur.a] && m.cur.a > 0) { s.notes[m.z + 1] = s.notes[m.cur.a]; delete s.notes[m.cur.a]; } }
     else { // unlabelled first section can't be "before" anything; nothing to do
     }
   });
@@ -2655,6 +2721,8 @@ function joinNext() {
     const lab = labelAt(s, m.next.a); if (!lab) return;
     if (emptied) { const mine = labelAt(s, m.cur.a); if (mine) s.secs = s.secs.filter(x => x !== mine); }
     if (s.flow[m.next.a]) { delete s.flow[m.next.a]; s.flow[m.a] = 1; }
+    // the merged section is the next one now: it brings its notes, the emptied section's notes go
+    const nn = s.notes[m.next.a]; if (emptied || nn) delete s.notes[m.a]; if (nn) { s.notes[m.a] = nn; delete s.notes[m.next.a]; }
     lab.at = m.a;
   });
   toast(emptied ? `Moved ${rangeName(m.a, m.z)} into ${m.next.label}; “${m.cur.label}” had no bars left, so its label was removed.` : `Moved ${rangeName(m.a, m.z)} into ${m.next.label}.`, { label: "Undo", run: undo });
@@ -2759,7 +2827,7 @@ function rebar(s, i, newLen) {
   outFill.forEach((fm, j) => { if (fm) s.fill[i + j] = fm; });
   // marks that belong to bars past the new end go
   const n = s.bars.length;
-  for (const f of ["brk", "solo", "flow"]) for (const k in s[f]) if (+k >= n) delete s[f][k];
+  for (const f of ["brk", "solo", "flow", "notes"]) for (const k in s[f]) if (+k >= n) delete s[f][k];
   s.secs = s.secs.filter(x => x.at < n);
 }
 function splitAt(c) {
@@ -2876,6 +2944,7 @@ function wire() {
 
   // chart
   $("#chart").onclick = e => {
+    if (noteClick(e)) return;
     const fl = e.target.closest("[data-flow]");
     if (fl) { const a = +fl.dataset.flow, on = !App.cur.flow[a]; change(s => { if (on) s.flow[a] = 1; else delete s.flow[a]; }); toast(on ? "Section written out bar by bar." : "Repeats grouped again."); return; }
     const lp = e.target.closest("[data-loopsec]");
@@ -2889,6 +2958,14 @@ function wire() {
     selectBar(i); document.body.classList.add("editing");
     if (P.on) { pause(); P.cur = barStarts(App.cur)[i] - 1; play(); }
   };
+  $("#chart").addEventListener("keydown", e => {
+    if (e.target.id === "secNoteBox") { if (e.key === "Escape") { e.preventDefault(); closeNote(); } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNote(); } return; }
+    const n = e.target.closest(".sec-note[data-sn-edit]"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openNote(+n.dataset.snEdit); }
+  });
+  // the box's own buttons mustn't take the focus (that would count as leaving the box)
+  $("#chart").addEventListener("pointerdown", e => { if (e.target.closest(".sec-note-act button")) e.preventDefault(); });
+  // leaving the box (tapping elsewhere) keeps what was typed
+  $("#chart").addEventListener("focusout", e => { if (e.target.id === "secNoteBox") setTimeout(() => { if (App.noteEdit != null && !(document.activeElement && document.activeElement.closest(".sec-note.editing"))) saveNote(); }, 0); });
   // double-click (or double-tap) a bar: play from it
   $("#chart").addEventListener("dblclick", e => { const b = e.target.closest(".bar"); if (b) { e.preventDefault(); playFromBar(+b.dataset.i); } });
   let lastTap = { t: 0, i: -1 };
